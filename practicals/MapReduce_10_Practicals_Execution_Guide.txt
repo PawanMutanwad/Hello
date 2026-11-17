@@ -1,0 +1,690 @@
+MAPREDUCE IN PYTHON - 10 PRACTICALS
+==================================
+Execution commands are at the top. The mapper.py and reducer.py code for all
+10 practicals is included below.
+
+IMPORTANT
+---------
+1. Run Linux/Hadoop commands in the Ubuntu terminal (Bash).
+2. Put Python code into mapper.py and reducer.py using nano.
+3. Hadoop Streaming sends input lines to the mapper, sorts mapper output by
+   key, and sends grouped keys to the reducer.
+4. Each practical uses its own folder and HDFS input/output paths.
+5. Create input.txt using the exact input format stated for that practical.
+6. Practical 10 uses a pipe (|) delimiter, as specified in the uploaded PDF.
+
+
+============================================================
+A. ONE-TIME SETUP COMMANDS (RUN IN UBUNTU TERMINAL)
+============================================================
+
+# 1. Load environment variables
+source ~/.bashrc
+
+# 2. Create the main working directory
+mkdir -p ~/mapreduce_practicals
+cd ~/mapreduce_practicals
+
+# 3. Start HDFS (if it is not already running)
+start-dfs.sh
+
+# 4. Check Hadoop processes
+jps
+
+# 5. Find the Hadoop Streaming JAR
+find "$HADOOP_HOME" -name 'hadoop-streaming*.jar'
+
+# 6. Set STREAMING_JAR automatically to the first matching JAR
+export STREAMING_JAR="$(find "$HADOOP_HOME" -name 'hadoop-streaming*.jar' -print -quit)"
+
+# 7. Verify the path (it should show a .jar file path)
+echo "$STREAMING_JAR"
+
+# If the output is blank, copy the actual path printed by the find command
+# and set it manually, for example:
+# export STREAMING_JAR="$HADOOP_HOME/share/hadoop/tools/lib/hadoop-streaming-VERSION.jar"
+
+
+============================================================
+B. STANDARD EXECUTION COMMANDS (USE FOR EACH PRACTICAL)
+============================================================
+
+The example below runs Practical 1. For Practical 2, change practical1 to
+practical2 everywhere. Continue the same way up to practical10.
+
+# 1. Create and enter the practical folder
+mkdir -p ~/mapreduce_practicals/practical1
+cd ~/mapreduce_practicals/practical1
+
+# 2. Create the mapper file, paste the mapper code, save with Ctrl+O, Enter,
+#    and exit with Ctrl+X
+nano mapper.py
+
+# 3. Create the reducer file, paste the reducer code, and save
+nano reducer.py
+
+# 4. Create the input file and enter data in the required format
+nano input.txt
+
+# 5. Make mapper and reducer executable
+chmod +x mapper.py reducer.py
+
+# 6. Test locally before submitting to Hadoop
+cat input.txt | ./mapper.py | sort | ./reducer.py
+
+# 7. Create the HDFS input directory
+hdfs dfs -mkdir -p /user/$USER/practical1/input
+
+# 8. Upload the local input file to HDFS
+hdfs dfs -put -f input.txt /user/$USER/practical1/input/
+
+# 9. Remove the old output directory before rerunning the same practical
+#    (Hadoop will not run a job if its output directory already exists)
+hdfs dfs -rm -r -f /user/$USER/practical1/output
+
+# 10. Run the Hadoop Streaming job
+hadoop jar "$STREAMING_JAR" \
+  -D mapreduce.job.reduces=1 \
+  -files mapper.py,reducer.py \
+  -mapper mapper.py \
+  -reducer reducer.py \
+  -input /user/$USER/practical1/input \
+  -output /user/$USER/practical1/output
+
+# 11. Display the result
+hdfs dfs -cat /user/$USER/practical1/output/part-00000
+
+# 12. Check HDFS input/output files
+hdfs dfs -ls /user/$USER/practical1/input
+hdfs dfs -ls /user/$USER/practical1/output
+
+
+============================================================
+C. QUICK EXECUTION TEMPLATE FOR PRACTICAL 2 TO PRACTICAL 10
+============================================================
+
+For each practical, first create its folder and save that practical's mapper,
+reducer, and input files. Then run the commands below after changing N.
+
+# Replace N with 2, 3, 4, ... 10
+N=2
+P="practical$N"
+mkdir -p ~/mapreduce_practicals/$P
+cd ~/mapreduce_practicals/$P
+nano mapper.py
+nano reducer.py
+nano input.txt
+chmod +x mapper.py reducer.py
+cat input.txt | ./mapper.py | sort | ./reducer.py
+hdfs dfs -mkdir -p /user/$USER/$P/input
+hdfs dfs -put -f input.txt /user/$USER/$P/input/
+hdfs dfs -rm -r -f /user/$USER/$P/output
+hadoop jar "$STREAMING_JAR" \
+  -D mapreduce.job.reduces=1 \
+  -files mapper.py,reducer.py \
+  -mapper mapper.py \
+  -reducer reducer.py \
+  -input /user/$USER/$P/input \
+  -output /user/$USER/$P/output
+hdfs dfs -cat /user/$USER/$P/output/part-00000
+
+
+============================================================
+PRACTICAL 1 - FREQUENCY OF A GIVEN WORD
+============================================================
+Input format: Ordinary text, one or more words per line.
+This mapper counts the word "hadoop" without case sensitivity or punctuation.
+
+Example input.txt:
+Hadoop is useful. Hadoop is fast.
+
+--- mapper.py ---
+#!/usr/bin/env python3
+import sys
+import re
+
+TARGET = "hadoop"
+
+for line in sys.stdin:
+    words = re.findall(r"[A-Za-z0-9]+", line.lower())
+    for word in words:
+        if word == TARGET:
+            print(TARGET + "\t1")
+
+--- reducer.py ---
+#!/usr/bin/env python3
+import sys
+
+total = 0
+
+for line in sys.stdin:
+    word, count = line.strip().split("\t")
+    total += int(count)
+
+print("hadoop\t" + str(total))
+
+Expected output for the example:
+hadoop    2
+
+
+============================================================
+PRACTICAL 2 - MONTHLY/YEARLY MAXIMUM WEATHER VALUES
+============================================================
+Input format (no header): year,month,temperature,rainfall,dew_point
+Example input.txt:
+2024,01,31.5,12.0,18.2
+2024,01,33.0,15.0,19.0
+2024,02,29.0,8.0,17.0
+
+--- mapper.py ---
+#!/usr/bin/env python3
+import sys
+
+for line in sys.stdin:
+    parts = line.strip().split(",")
+    if len(parts) != 5:
+        continue
+    year, month, temp, rain, dew = parts
+    key = year + "-" + month
+    print(key + "\t" + temp + "," + rain + "," + dew)
+
+--- reducer.py ---
+#!/usr/bin/env python3
+import sys
+
+current = None
+max_temp = max_rain = max_dew = None
+
+def show():
+    if current is not None:
+        print(current + "\t" + str(max_temp) + "\t" +
+              str(max_rain) + "\t" + str(max_dew))
+
+for line in sys.stdin:
+    key, values = line.strip().split("\t")
+    temp, rain, dew = map(float, values.split(","))
+    if key != current:
+        show()
+        current = key
+        max_temp, max_rain, max_dew = temp, rain, dew
+    else:
+        max_temp = max(max_temp, temp)
+        max_rain = max(max_rain, rain)
+        max_dew = max(max_dew, dew)
+
+show()
+
+Output: year-month, maximum temperature, maximum rainfall, maximum dew point.
+If the dataset has a header, remove it or add a header-skip condition in mapper.
+
+
+============================================================
+PRACTICAL 3 - FIND STUDENT GRADES
+============================================================
+Input format (no header): student_name,marks
+Grade scale in this example: A >= 80, B >= 60, C >= 40, otherwise F.
+
+Example input.txt:
+Aarav,85
+Diya,72
+Rohan,48
+Isha,32
+
+--- mapper.py ---
+#!/usr/bin/env python3
+import sys
+
+for line in sys.stdin:
+    parts = line.strip().split(",")
+    if len(parts) == 2:
+        name, marks = parts
+        print(name + "\t" + marks)
+
+--- reducer.py ---
+#!/usr/bin/env python3
+import sys
+
+for line in sys.stdin:
+    name, marks = line.strip().split("\t")
+    marks = float(marks)
+    if marks >= 80:
+        grade = "A"
+    elif marks >= 60:
+        grade = "B"
+    elif marks >= 40:
+        grade = "C"
+    else:
+        grade = "F"
+    print(name + "\t" + str(marks) + "\t" + grade)
+
+Use your teacher's grading scale if it is different.
+
+
+============================================================
+PRACTICAL 4 - MATRIX MULTIPLICATION
+============================================================
+Input format: matrix,row,column,value
+A 2x2 and B 2x2 example input.txt:
+A,0,0,1
+A,0,1,2
+A,1,0,3
+A,1,1,4
+B,0,0,5
+B,0,1,6
+B,1,0,7
+B,1,1,8
+
+--- mapper.py ---
+#!/usr/bin/env python3
+import sys
+
+M = 2  # number of rows in matrix A
+P = 2  # number of columns in matrix B
+
+for line in sys.stdin:
+    matrix, row, col, value = line.strip().split(",")
+    row, col, value = int(row), int(col), float(value)
+    if matrix == "A":
+        i, k = row, col
+        for j in range(P):
+            print(f"{i},{j}\tA,{k},{value}")
+    elif matrix == "B":
+        k, j = row, col
+        for i in range(M):
+            print(f"{i},{j}\tB,{k},{value}")
+
+--- reducer.py ---
+#!/usr/bin/env python3
+import sys
+
+current = None
+a = {}
+b = {}
+
+def show():
+    if current is not None:
+        total = 0
+        for k in a:
+            if k in b:
+                total += a[k] * b[k]
+        print(current + "\t" + str(total))
+
+for line in sys.stdin:
+    key, item = line.strip().split("\t")
+    matrix, k, value = item.split(",")
+    k, value = int(k), float(value)
+    if key != current:
+        show()
+        current = key
+        a, b = {}, {}
+    if matrix == "A":
+        a[k] = value
+    else:
+        b[k] = value
+
+show()
+
+Set M and P in mapper.py to match your matrix dimensions. Use one reducer.
+Expected cells for the example: (0,0)=19, (0,1)=22, (1,0)=43, (1,1)=50.
+
+
+============================================================
+PRACTICAL 5 - MAXIMUM ELECTRICAL CONSUMPTION IN EACH YEAR
+============================================================
+Input format (no header): year,month,consumption
+Example input.txt:
+2023,01,450
+2023,02,520
+2024,01,480
+2024,02,610
+
+--- mapper.py ---
+#!/usr/bin/env python3
+import sys
+
+for line in sys.stdin:
+    parts = line.strip().split(",")
+    if len(parts) == 3:
+        year, month, consumption = parts
+        print(year + "\t" + consumption)
+
+--- reducer.py ---
+#!/usr/bin/env python3
+import sys
+
+year_now = None
+maximum = None
+
+def show():
+    if year_now is not None:
+        print(year_now + "\t" + str(maximum))
+
+for line in sys.stdin:
+    year, value = line.strip().split("\t")
+    value = float(value)
+    if year != year_now:
+        show()
+        year_now = year
+        maximum = value
+    else:
+        maximum = max(maximum, value)
+
+show()
+
+Output: each year and its maximum monthly consumption.
+
+
+============================================================
+PRACTICAL 6 - CLASSIFY WEATHER AS SUNNY OR COOL
+============================================================
+Input format (no header): date,temperature,sunshine_hours
+Rule used in this example: Sunny if sunshine >= 6; otherwise Cool if
+temperature <= 20; otherwise Not Sunny/Cool.
+
+Example input.txt:
+2024-01-01,25,8
+2024-01-02,18,3
+2024-01-03,27,4
+
+--- mapper.py ---
+#!/usr/bin/env python3
+import sys
+
+for line in sys.stdin:
+    parts = line.strip().split(",")
+    if len(parts) != 3:
+        continue
+    date, temp, sunshine = parts
+    print(date + "\t" + temp + "," + sunshine)
+
+--- reducer.py ---
+#!/usr/bin/env python3
+import sys
+
+for line in sys.stdin:
+    date, values = line.strip().split("\t")
+    temp, sunshine = map(float, values.split(","))
+    if sunshine >= 6:
+        result = "Sunny"
+    elif temp <= 20:
+        result = "Cool"
+    else:
+        result = "Not Sunny/Cool"
+    print(date + "\t" + result)
+
+Change the thresholds if your teacher specifies different definitions.
+
+
+============================================================
+PRACTICAL 7 - NUMBER OF PRODUCTS SOLD IN EACH COUNTRY
+============================================================
+Input format (CSV):
+Transaction_Date,Product,Price,Payment_Type,Name,City,State,Country,
+Account_Created,Last_Login,Latitude,Longitude
+Country is the 8th column (index 7). If there is a header, remove it or
+skip it in the mapper.
+
+Example input.txt (simplified rows with all 12 columns):
+2024-01-01,Book,100,Cash,Ana,Pune,MH,India,2020-01-01,2024-01-01,18.5,73.8
+2024-01-02,Pen,20,Card,Sam,Mumbai,MH,India,2021-01-01,2024-01-02,19.0,72.8
+2024-01-03,Bag,500,Card,Tom,London,London,UK,2022-01-01,2024-01-03,51.5,-0.1
+
+--- mapper.py ---
+#!/usr/bin/env python3
+import sys
+import csv
+
+for line in sys.stdin:
+    row = next(csv.reader([line]))
+    if len(row) >= 8:
+        country = row[7].strip()
+        if country:
+            print(country + "\t1")
+
+--- reducer.py ---
+#!/usr/bin/env python3
+import sys
+
+country_now = None
+total = 0
+
+def show():
+    if country_now is not None:
+        print(country_now + "\t" + str(total))
+
+for line in sys.stdin:
+    country, count = line.strip().split("\t")
+    if country != country_now:
+        show()
+        country_now = country
+        total = 0
+    total += int(count)
+
+show()
+
+This counts transaction rows per country (one row is treated as one sale).
+
+
+============================================================
+PRACTICAL 8 - MOVIELENS TAGS ASSOCIATED WITH EACH MOVIE
+============================================================
+Input format: MovieLens tags.csv columns: userId,movieId,tag,timestamp
+The mapper emits movieId as key and tag as value.
+
+Example input.txt:
+1,10, funny,111248
+2,10, action,111249
+3,20, drama,111250
+
+--- mapper.py ---
+#!/usr/bin/env python3
+import sys
+import csv
+
+for line in sys.stdin:
+    row = next(csv.reader([line]))
+    if len(row) >= 3 and row[1] != "movieId":
+        movie_id = row[1]
+        tag = row[2]
+        print(movie_id + "\t" + tag)
+
+--- reducer.py ---
+#!/usr/bin/env python3
+import sys
+
+movie_now = None
+tags = []
+
+def show():
+    if movie_now is not None:
+        print(movie_now + "\t" + ", ".join(tags))
+
+for line in sys.stdin:
+    movie, tag = line.rstrip("\n").split("\t", 1)
+    if movie != movie_now:
+        show()
+        movie_now = movie
+        tags = []
+    tags.append(tag)
+
+show()
+
+Repeated tags are retained, as different users may have applied the same tag.
+
+
+============================================================
+PRACTICAL 9 - BOOKS PUBLISHED EACH YEAR AND YEAR WITH MOST BOOKS
+============================================================
+Input format: Title,Author,PublishedYear,AuthorCountry,Language,Pages
+The mapper emits year and 1. The reducer counts books by year and prints
+the year with the largest count.
+
+Example input.txt:
+Title A,Author A,2020,India,English,200
+Title B,Author B,2021,UK,English,250
+Title C,Author C,2020,India,English,180
+
+--- mapper.py ---
+#!/usr/bin/env python3
+import sys
+import csv
+
+for line in sys.stdin:
+    row = next(csv.reader([line]))
+    if len(row) >= 3 and row[2] != "PublishedYear":
+        year = row[2].strip()
+        if year:
+            print(year + "\t1")
+
+--- reducer.py (recommended maximum version) ---
+#!/usr/bin/env python3
+import sys
+
+counts = {}
+
+for line in sys.stdin:
+    year, value = line.strip().split("\t")
+    counts[year] = counts.get(year, 0) + int(value)
+
+for year in sorted(counts):
+    print(year + "\t" + str(counts[year]))
+
+if counts:
+    best = max(counts, key=counts.get)
+    print("MAX_BOOKS_YEAR\t" + best + "\t" + str(counts[best]))
+
+This reducer stores year totals in memory; suitable for a small classroom dataset.
+
+
+============================================================
+PRACTICAL 10 - XYZ MUSIC LISTENING LOG ANALYSIS
+============================================================
+Input format (pipe-separated): UserId|TrackId|Shared|Radio|Skip
+Each row is one track event. Reports unique listeners and per-track shares,
+radio plays, total listens, and radio skips (Radio=1 and Skip=1).
+
+Example input.txt:
+U1|T1|1|1|1
+U2|T1|0|1|0
+U1|T2|1|0|0
+
+--- mapper.py ---
+#!/usr/bin/env python3
+import sys
+
+for line in sys.stdin:
+    parts = line.strip().split("|")
+    if len(parts) != 5 or parts[0].strip() == "UserId":
+        continue
+
+    user, track, shared, radio, skip = [x.strip() for x in parts]
+
+    # Key ALL counts unique users globally.
+    print("ALL\tUSER:" + user)
+
+    # Per-track counters.
+    print("TRACK:" + track + "\tSHARED:" + shared)
+    print("TRACK:" + track + "\tRADIO:" + radio)
+    print("TRACK:" + track + "\tLISTEN:1")
+    print("TRACK:" + track + "\tSKIP:" + str(int(radio) * int(skip)))
+
+--- reducer.py ---
+#!/usr/bin/env python3
+import sys
+
+users = set()
+track_stats = {}
+
+for line in sys.stdin:
+    key, value = line.strip().split("\t", 1)
+
+    if key == "ALL":
+        users.add(value.replace("USER:", ""))
+    else:
+        track = key.replace("TRACK:", "")
+        if track not in track_stats:
+            track_stats[track] = [0, 0, 0, 0]
+        if value.startswith("SHARED:"):
+            track_stats[track][0] += int(value[7:])
+        elif value.startswith("RADIO:"):
+            track_stats[track][1] += int(value[6:])
+        elif value == "LISTEN:1":
+            track_stats[track][2] += 1
+        elif value.startswith("SKIP:"):
+            track_stats[track][3] += int(value[5:])
+
+print("UNIQUE_LISTENERS\t" + str(len(users)))
+for track in sorted(track_stats):
+    s, r, listens, skips = track_stats[track]
+    print("TRACK", track, "SHARED", s, "RADIO", r,
+          "TOTAL_LISTENS", listens, "RADIO_SKIPS", skips)
+
+IMPORTANT: Use exactly one reducer for this practical because it calculates
+a global unique-user set and per-track totals.
+
+
+============================================================
+D. COMMON ERRORS - QUICK FIXES
+============================================================
+
+1. Permission denied / mapper not executable:
+   chmod +x mapper.py reducer.py
+
+2. Python 3 not found:
+   python3 --version
+   Make sure Python 3 is installed and in PATH.
+
+3. Output directory already exists:
+   hdfs dfs -rm -r -f /user/$USER/practicalN/output
+   Replace N with the practical number.
+
+4. No output / malformed rows:
+   Check the input delimiter, column order, and header row.
+
+5. Streaming JAR not found:
+   find "$HADOOP_HOME" -name 'hadoop-streaming*.jar'
+   Set STREAMING_JAR to the returned full path.
+
+6. Mapper/reducer syntax error:
+   Test locally:
+   cat input.txt | ./mapper.py | sort | ./reducer.py
+
+7. Hadoop commands not found:
+   source ~/.bashrc
+   echo "$HADOOP_HOME"
+
+
+============================================================
+E. IMPORTANT COMMANDS TO REMEMBER FOR THE EXAM
+============================================================
+
+# Create/open a file in Nano
+nano mapper.py
+
+# Save Nano file: Ctrl+O, Enter; exit: Ctrl+X
+
+# View a file
+cat mapper.py
+
+# Give execute permission
+chmod +x mapper.py reducer.py
+
+# Local mapper-reducer test
+cat input.txt | ./mapper.py | sort | ./reducer.py
+
+# Upload input to HDFS
+hdfs dfs -put input.txt /user/$USER/practicalN/input/
+
+# Run a Streaming job
+hadoop jar "$STREAMING_JAR" -files mapper.py,reducer.py \
+  -mapper mapper.py -reducer reducer.py \
+  -input /user/$USER/practicalN/input \
+  -output /user/$USER/practicalN/output
+
+# Read output
+hdfs dfs -cat /user/$USER/practicalN/output/part-00000
+
+# Exit terminal shell session (not required for the job)
+exit
+
+END OF FILE
